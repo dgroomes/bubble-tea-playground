@@ -3,7 +3,7 @@
 📚 Learning and exploring the Go-based TUI framework: Bubble Tea.
 
 > The fun, functional and stateful way to build terminal apps.
-> 
+>
 > -- <cite>https://github.com/charmbracelet/bubbletea</cite>
 
 
@@ -20,7 +20,6 @@ I'd like to start by learning how to use Charm's TUI (Text User Interface) frame
 
 Follow these instructions to build and run an example program:
 
-1. Use Go 1.18
 1. Build and run the program:
    * ```shell
      go run .
@@ -28,28 +27,28 @@ Follow these instructions to build and run an example program:
    * Altogether it will look something like the following.
    * ```text
      go run .
-     
+
      What files should we summarize?
-     
+
      > [ ] go.mod
        [ ] go.sum
        [ ] README.md
        [ ] .gitignore
        [ ] file-summarizer.go
        [ ] .idea
-     
+
      Press 'e' to execute the file summarization. Press 'q' to quit.
      ```
    * ```text
      What files should we summarize?
-     
+
        [ ] go.mod
        [ ] go.sum
        [x] README.md
        [ ] .gitignore
        [ ] file-summarizer.go
      > [x] .idea
-     
+
      Press 'e' to execute the file summarization. Press 'q' to quit.
      ```
    * ```text
