@@ -57,6 +57,13 @@ Follow these instructions to build and run an example program:
      ```
 
 
+## Wish List
+
+General clean-ups, TODOs and things I wish to implement for this project
+
+* [ ] Handle when there are no files selected. Use a different message.
+
+
 ## Reference
 
 * [GitHub org: `charmbracelet`](https://github.com/charmbracelet)

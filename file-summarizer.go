@@ -1,60 +1,92 @@
+// A demo program that showcases the Bubble Tea TUI. Please see the README for more information.
+//
+// This is adapted from the official tutorials: https://github.com/charmbracelet/bubbletea/tree/master/tutorials
 package main
 
 import (
 	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
 	"os"
+	"strings"
 )
-import tea "github.com/charmbracelet/bubbletea"
 
-// A demo program that showcases the Bubble Tea TUI. Please see the README for more information.
-//
-// This is adapted from the official tutorials: https://github.com/charmbracelet/bubbletea/tree/master/tutorials
 func main() {
 
 	initialModel := model{
-		choices:   nil,
-		cursor:    0,
-		selected:  make(map[int]struct{}),
-		executing: false,
-		summaries: nil,
+		fileNameOptions: nil,
+		cursor:          0,
+		selected:        make(map[int]struct{}),
+		executing:       false,
+		fileSummaries:   nil,
 	}
 
 	p := tea.NewProgram(initialModel)
 
-	if err := p.Start(); err != nil {
+	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)
 	}
 }
 
-type model struct {
-	choices   []string         // Files in the current working directory. The user chooses which to summarize.
-	cursor    int              // Which file item our cursor is pointing at
-	selected  map[int]struct{} // While file items are selected
-	executing bool             // Are we in the execution state?
-	summaries []string         // The file summaries.
+// For when the files were listed.
+type fileListingMsg struct {
+	fileNames []string
 }
 
-func files() tea.Msg {
-	currentWorkingDir, _ := os.Getwd()
+// For when the file summarization is complete.
+type summarizationMsg struct {
+	fileSummaries []string
+}
 
-	file, _ := os.Open(currentWorkingDir)
+type model struct {
+	fileNameOptions []string         // Files in the current working directory. The user chooses among these to summarize.
+	cursor          int              // Which file item our cursor is pointing at
+	selected        map[int]struct{} // Which file items are selected
+	executing       bool             // Are we in the execution state?
+	fileSummaries   []string         // The file fileSummaries.
+}
 
-	names, _ := file.Readdirnames(0)
+// List the files in the current working directory.
+func listFiles() tea.Msg {
+	currentWorkingDir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
 
-	return names
+	dir, err := os.Open(currentWorkingDir)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := dir.Close()
+		if err != nil {
+			fmt.Printf("Failed to close the current working dir: %v\n", err)
+		}
+	}()
+
+	fileNames, err := dir.Readdirnames(0)
+	if err != nil {
+		return err
+	}
+
+	return fileListingMsg{fileNames}
 }
 
 func (m model) Init() tea.Cmd {
-	return files
+	return listFiles
 }
 
 // Summarize the given files. Return summaries for each file.
-func summarizeFiles(m model) (summaries, error) {
+func summarizeFiles(m model) ([]string, error) {
+	fileNameOptions := m.fileNameOptions
+	if fileNameOptions == nil {
+		return nil, fmt.Errorf("invalid state: Attempted to summarize files, but the file listing was never initialized")
+	}
 
 	chosenFileNames := make([]string, 0)
 	{
-		for i, choice := range m.choices {
+		for i, choice := range fileNameOptions {
 			_, exists := m.selected[i]
 			if exists {
 				chosenFileNames = append(chosenFileNames, choice)
@@ -78,22 +110,18 @@ func summarizeFiles(m model) (summaries, error) {
 	return fileSummaries, nil
 }
 
-type summaries []string
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case error:
 		return m, tea.Quit
 
-	case []string:
-		// The initialization command has completed. We have the list of file names.
-		// This is bad Go program design. Really, I should use a specific type... but I'm just learning here.
-		m.choices = msg
+	case fileListingMsg:
+		m.fileNameOptions = msg.fileNames
 
-	case summaries:
+	case summarizationMsg:
 		m.executing = false
-		m.summaries = msg
+		m.fileSummaries = msg.fileSummaries
 		return m, tea.Quit
 
 	// Is it a key press?
@@ -113,7 +141,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					return err
 				} else {
-					return summaries
+					return summarizationMsg{summaries}
 				}
 			}
 
@@ -125,7 +153,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// The "down" and "j" keys move the cursor down
 		case "down", "j":
-			if m.cursor < len(m.choices)-1 {
+			if m.cursor < len(m.fileNameOptions)-1 {
 				m.cursor++
 			}
 
@@ -142,7 +170,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Return the updated model to the Bubble Tea runtime for processing.
-	// Note that we're not returning a command.
+	// Note that we're not returning a command. Is this not an error/unexpected branch?
 	return m, nil
 }
 
@@ -151,7 +179,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // This is much like ReactJS, where the "render" function returns an abstract representation of the HTML that will be
 // rendered in the web page.
 func (m model) View() string {
-	if m.choices == nil {
+	if m.fileNameOptions == nil {
 		return "Initializing..."
 	}
 
@@ -159,13 +187,14 @@ func (m model) View() string {
 		return "Executing..."
 	}
 
-	if m.summaries != nil {
-		return fmt.Sprintf("Complete! Below is a summary of the selected files. It shows each file size, in bytes:\n%q\n", m.summaries)
+	if m.fileSummaries != nil {
+		return fmt.Sprintf("Complete! Below is a summary of the selected listFiles. It shows each file size, in bytes:\n%q\n", m.fileSummaries)
 	}
 
-	text := "What files should we summarize?\n\n"
+	var textBuilder strings.Builder
+	textBuilder.WriteString("What listFiles should we summarize?\n\n")
 
-	for i, choice := range m.choices {
+	for i, choice := range m.fileNameOptions {
 
 		// Tangential note: Go always automatically initializes variables. While in Java, I can rely on Java's compiler
 		// to tell me something to the effect of "Hey you didn't initialize this variable, you should have an else branch".
@@ -188,11 +217,11 @@ func (m model) View() string {
 			}
 		}
 
-		text += fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice)
+		textBuilder.WriteString(fmt.Sprintf("%s [%s] %s\n", cursor, checked, choice))
 	}
 
-	text += "\nPress 'e' to execute the file summarization. Press 'q' to quit.\n"
+	textBuilder.WriteString("\nPress 'e' to execute the file summarization. Press 'q' to quit.\n")
 
 	// Send the text to the Bubble Tea framework. The framework will take care of rendering it to the terminal.
-	return text
+	return textBuilder.String()
 }
