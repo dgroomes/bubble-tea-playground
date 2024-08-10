@@ -50,7 +50,7 @@ func prettyPrintBytes(bytes int64) string {
 	}
 }
 
-func listGitProjectFiles() ([]file, error) {
+func listGitProjectFiles() ([]*file, error) {
 	currentWorkingDir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -79,7 +79,7 @@ func listGitProjectFiles() ([]file, error) {
 
 	m := gitignore.NewMatcher(patterns)
 
-	var files []file
+	var files []*file
 
 	err = filepath.WalkDir(".", func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -115,7 +115,7 @@ func listGitProjectFiles() ([]file, error) {
 			return nil
 		}
 
-		files = append(files, file{filePath: path, size: -1})
+		files = append(files, &file{filePath: path, size: -1})
 		return nil
 	})
 

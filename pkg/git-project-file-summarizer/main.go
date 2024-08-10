@@ -40,9 +40,10 @@ func (f file) Description() string {
 }
 
 type model struct {
-	updateFn func()
-	list     teaList.Model
-	keys     key.Binding
+	updateFn        func()
+	domainListModel *[]*file // I'm going for "reference type vibes". Not idiomatic Go, but it's how I know how to program.
+	teaListModel    *teaList.Model
+	keys            key.Binding
 }
 
 func (m *model) Init() tea.Cmd {
@@ -59,46 +60,36 @@ func (m *model) Init() tea.Cmd {
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	log.Printf("Update: %v\n", msg)
+	log.Printf("[Update] msg=%v teaListModelLength=%d\n", msg, len(m.teaListModel.Items()))
 
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
 		h, v := appStyle.GetFrameSize()
-		m.list.SetSize(msg.Width-h, msg.Height-v)
+		m.teaListModel.SetSize(msg.Width-h, msg.Height-v)
 
 	case tea.KeyMsg:
 
 		switch msg.String() {
 
 		case "enter":
-			selectedItem, ok := m.list.SelectedItem().(file)
+			selectedItem, ok := m.teaListModel.SelectedItem().(*file)
 			if ok {
 				log.Println("[enter] [ok]")
 				if selectedItem.fetching {
 					log.Println("[enter] [ok] [fetching]")
 					// todo tick?
 				} else if selectedItem.size == -1 {
-					currentIdx := m.list.Index()
-					log.Printf("Fetching size for %s\n", selectedItem.filePath)
-					selectedItem.fetching = true
-					m.list.SetItem(currentIdx, selectedItem)
 					go func() {
-						FetchSize(&selectedItem)
-						log.Printf("About to set item %d with value %v\n", currentIdx, selectedItem)
-						// This is a race condition. If the item was removed from the list, then it's an error to add it
-						// back.
-						//
-						// This reminds of React and lists. In React, you'll run into a "Warning: Each child in a list should have a unique “key” prop."
-						// And this is well described by the docs:https://react.dev/learn/rendering-lists#keeping-list-items-in-order-with-key
-						// I think I should just go with the "blow it all away and re-render" approach. That's like my
-						// favorite advantage of this programming paradigm.
-						m.list.SetItem(currentIdx, selectedItem)
+						log.Printf("Fetching size for %s\n", selectedItem.filePath)
+						selectedItem.fetching = true
+						m.updateFn()
+						FetchSize(selectedItem)
 						m.updateFn()
 					}()
 				}
 			} else {
-				log.Printf("Unable to cast selectedItem to 'file': %v . This is unexpected.\n", m.list.SelectedItem())
+				log.Fatalf("Unable to cast selectedItem to 'file': %v . This is unexpected.\n", m.teaListModel.SelectedItem())
 			}
 
 		// These keys should exit the program.
@@ -107,14 +98,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	newListModel, cmd := m.list.Update(msg)
-	m.list = newListModel
+	newListModel, cmd := m.teaListModel.Update(msg)
+	*m.teaListModel = newListModel
+	log.Printf("[Update] newListModel=%d\n", len(newListModel.Items()))
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)
 }
 
 func (m *model) View() string {
-	return appStyle.Render(m.list.View())
+	return appStyle.Render(m.teaListModel.View())
 }
 
 func main() {
@@ -135,19 +127,78 @@ func main() {
 		key.WithHelp("enter", "summarize selected"))
 
 	delegate := teaList.NewDefaultDelegate() // I haven't figured out what this delegate is for yet.
-	list := teaList.New(make([]teaList.Item, 0), delegate, 0, 0)
-	list.Title = "Git Project Files Summarizer"
-	list.Styles.Title = titleStyle
-	list.AdditionalFullHelpKeys = func() []key.Binding {
+	teaListModel := teaList.New(make([]teaList.Item, 0), delegate, 0, 0)
+	teaListModel.Title = "Git Project Files Summarizer"
+	teaListModel.Styles.Title = titleStyle
+	teaListModel.AdditionalFullHelpKeys = func() []key.Binding {
 		return []key.Binding{
 			listKeyMap,
 		}
 	}
 
 	var programPtr = new(tea.Program)
+	var modelPtr = new(model)
+
+	// The updateFn is a bridge between my own domain model and the Bubble Tea machinery. It's similar in spirit to
+	// Bubble Tea's "Update" function, but it isn't message driven. Or you might say, it isn't inspired by the Elm
+	// Architecture. I'm not passionate about the design I've come up with, but just experimenting.
 	updateFn := func() {
+		log.Println("[updateFn]")
 		if programPtr == nil {
-			log.Fatal("The update was called before the program pointer was set. This is an illegal state.")
+			log.Fatal("[updateFn] updateFn was called before the program pointer was set. This is an illegal state.")
+		}
+		if modelPtr == nil {
+			log.Fatal("[updateFn] updateFn was called before the model pointer was set. This is an illegal state.")
+		}
+
+		files := *modelPtr.domainListModel
+
+		if len(files) != 0 {
+			log.Println("[updateFn] 'files' is not empty. Adapting the domain model into the TUI model.")
+
+			// Here specifically, we're bridging the domain models' 'set of files' to the model of the 'list' TUI
+			// component in the Bubbles component library. I'm going with a React-style "blow it all away and re-render"
+			// approach. Although here, we're not at the render stage/view stage we're actually at an earlier
+			// "sync the models" stage. This is a wasteful operation, but I like the programming model.
+
+			// First, take note of the selected item in the list. We'll try to preserve this selection.
+			var selectedItem *file
+			if modelPtr.teaListModel.SelectedItem() == nil {
+				log.Println("[updateFn] The Bubbles list has no selected item. This is normal at startup time.")
+			} else {
+				x, ok := modelPtr.teaListModel.SelectedItem().(*file)
+				if !ok {
+					log.Fatal("[updateFn] The 'SelectedItem' in the Bubbles list is not a pointer to 'file'. This is unexpected. (But couldn't it be nil?)")
+				}
+				selectedItem = x
+			}
+
+			desiredIndex := -1
+			items := make([]teaList.Item, 0, len(files))
+			for i, f := range files {
+				items = append(items, f)
+				// This reminds of React and lists. In React, you'll run into a "Warning: Each child in a list should have a unique “key” prop."
+				// And this is well described by the docs:https://react.dev/learn/rendering-lists#keeping-list-items-in-order-with-key
+				//
+				// I'm not using a key. Instead of comparing based on pointer equality, which is dubious because there's
+				// no guarantee that any given address will point the same data in the future.
+				if selectedItem == f {
+					desiredIndex = i
+				}
+			}
+			modelPtr.teaListModel.SetItems(items)
+
+			// Re-select the original item. We have to do this because there is a chance that the list has shifted
+			// (elements added or removed) during this update operation (well there is no chance because I didn't
+			// program it that way, but I'm playing pretend)
+			if desiredIndex >= 0 { // Not totally sure I need this check
+				log.Printf("[updateFn] Reselecting item at index %d\n", desiredIndex)
+				modelPtr.teaListModel.Select(desiredIndex)
+			} else {
+				log.Println("[updateFn] There was no existing item selection. I think this is normal at startup time.")
+			}
+		} else {
+			log.Println("[updateFn] 'files' is empty.")
 		}
 
 		// Signal to the Bubble Tea machinery that something in the model changed. This "do nothing" message will get
@@ -158,15 +209,17 @@ func main() {
 
 	// TODO I'd like to experiment with a 'domainModel' and a 'teaModel' to separate the domain logic from the TUI API.
 	m := model{
-		updateFn: updateFn,
-		list:     list,
-		keys:     listKeyMap,
+		updateFn:        updateFn,
+		teaListModel:    &teaListModel,
+		domainListModel: &[]*file{},
+		keys:            listKeyMap,
 	}
 
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	// Let's do some acrobatics to make sure our model has access to the Bubble Tea program value. This is not idiomatic
 	// Bubble Tea code but this is what I prefer and like to experiment with.
 	*programPtr = *p
+	*modelPtr = m
 
 	go func() {
 		log.Println("Go routine is executing to find Git project files ...")
@@ -180,17 +233,7 @@ func main() {
 
 		log.Printf("Found %d files\n", len(files))
 
-		if len(files) != 0 {
-			// Is this the right way to turn a slice of 'file' into a slice of 'Item'?
-			items := make([]teaList.Item, 0, len(files))
-			for _, f := range files {
-				items = append(items, f)
-			}
-
-			m.list.SetItems(items)
-			m.list.Select(0)
-		}
-
+		*modelPtr.domainListModel = files
 		updateFn()
 	}()
 
