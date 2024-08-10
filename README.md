@@ -1,4 +1,4 @@
-# bubbletea-playground
+# bubble-tea-playground
 
 📚 Learning and exploring the Go-based TUI framework: Bubble Tea.
 
@@ -18,11 +18,11 @@ I'd like to start by learning how to use Charm's TUI (Text User Interface) frame
 
 ## Instructions
 
-Follow these instructions to build and run an example program:
+Follow these instructions to build and run some Bubble Tea example programs.
 
-1. Build and run the program:
+1. Build and run the file summarizer program:
    * ```shell
-     go run .
+     go run bubble_tea_playground/pkg/file-summarizer
      ```
    * Altogether it will look something like the following.
    * ```text
@@ -55,6 +55,10 @@ Follow these instructions to build and run an example program:
      Complete! Below is a summary of the selected files. It shows each file size, in bytes:
      ["README.md: 1630" ".idea: 192"]
      ```
+2. Now, let's implement similar functionality but in a fancy list TUI component.
+    * ```shell
+      go run bubble_tea_playground/pkg/git-project-file-summarizer
+      ```
 
 
 ## Wish List
@@ -62,6 +66,12 @@ Follow these instructions to build and run an example program:
 General clean-ups, TODOs and things I wish to implement for this project
 
 * [ ] Handle when there are no files selected. Use a different message.
+* [ ] IN PROGRESS Other UI components? Can I do a table (yes)? I'm going to implement a "fancy list". This is a much
+  more "in the weeds" example. I've got something working, I want to refactor it and also add the spinner animation.
+   * DONE Functional program
+   * Add spinner animation
+   * Consider splitting out a "core/domain" package/file
+   * Consider splitting out a "git" package/file
 
 
 ## Reference
@@ -69,3 +79,7 @@ General clean-ups, TODOs and things I wish to implement for this project
 * [GitHub org: `charmbracelet`](https://github.com/charmbracelet)
 * [Bubble Tea tutorials: the basics](https://github.com/charmbracelet/bubbletea/tree/master/tutorials/basics)
   * Wow, this was an easy tutorial to follow.
+* [GitHub org: `bubbles`](https://github.com/charmbracelet/bubbles)
+  * > TUI components for Bubble Tea
+* [GitHub org: `lipgloss`](https://github.com/charmbracelet/lipgloss)
+  * > Style definitions for nice terminal layout
