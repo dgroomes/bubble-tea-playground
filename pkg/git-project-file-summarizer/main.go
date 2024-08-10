@@ -43,7 +43,7 @@ func FetchSize(f *file) {
 		log.Fatal(err)
 	}
 
-	// Artificially slow down the program to simulate a slow operation.
+	// Artificially slow down the program to simulate a slow operation and get a visual effect in the TUI.
 	time.Sleep(750 * time.Millisecond)
 
 	f.size = fi.Size()
@@ -51,9 +51,7 @@ func FetchSize(f *file) {
 	log.Println("Fetched size for", f.filePath)
 }
 
-func (f file) Title() string { return f.filePath }
-
-// FilterValue is this the value that search will use?
+func (f file) Title() string       { return f.filePath }
 func (f file) FilterValue() string { return f.filePath }
 func (f file) Description() string {
 	if f.fetching {
@@ -86,9 +84,9 @@ func prettyPrintBytes(bytes int64) string {
 }
 
 type model struct {
-	program *tea.Program
-	list    teaList.Model
-	keys    key.Binding
+	updateFn func()
+	list     teaList.Model
+	keys     key.Binding
 }
 
 func listGitProjectFiles() ([]file, error) {
@@ -212,7 +210,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// I think I should just go with the "blow it all away and re-render" approach. That's like my
 						// favorite advantage of this programming paradigm.
 						m.list.SetItem(currentIdx, selectedItem)
-						m.program.Send(struct{}{})
+						m.updateFn()
 					}()
 				}
 			} else {
@@ -262,15 +260,29 @@ func main() {
 		}
 	}
 
-	m := model{
-		program: new(tea.Program),
-		list:    list,
-		keys:    listKeyMap,
+	var programPtr = new(tea.Program)
+	updateFn := func() {
+		if programPtr == nil {
+			log.Fatal("The update was called before the program pointer was set. This is an illegal state.")
+		}
+
+		// Signal to the Bubble Tea machinery that something in the model changed. This "do nothing" message will get
+		// sent to the "Update" function and then soon afterward the "View" function will be called to re-render the
+		// view.
+		programPtr.Send(struct{}{})
 	}
+
+	// TODO I'd like to experiment with a 'domainModel' and a 'teaModel' to separate the domain logic from the TUI API.
+	m := model{
+		updateFn: updateFn,
+		list:     list,
+		keys:     listKeyMap,
+	}
+
 	p := tea.NewProgram(&m, tea.WithAltScreen())
 	// Let's do some acrobatics to make sure our model has access to the Bubble Tea program value. This is not idiomatic
 	// Bubble Tea code but this is what I prefer and like to experiment with.
-	*m.program = *p
+	*programPtr = *p
 
 	go func() {
 		log.Println("Go routine is executing to find Git project files ...")
@@ -279,7 +291,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		// Artificially slow down the program to simulate a slow operation.
+		// Artificially slow down the program to simulate a slow operation and get a visual effect in the TUI.
 		time.Sleep(750 * time.Millisecond)
 
 		log.Printf("Found %d files\n", len(files))
@@ -295,9 +307,7 @@ func main() {
 			m.list.Select(0)
 		}
 
-		// We need to signal to the Bubble Tea machinery that something changed. This "do nothing" message will get
-		// sent to the "Update" function and then soon afterward the "View" function will be called to re-render the view.
-		p.Send(struct{}{})
+		updateFn()
 	}()
 
 	_, err = p.Run()
