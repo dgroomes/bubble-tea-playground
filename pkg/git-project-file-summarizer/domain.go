@@ -1,3 +1,8 @@
+// The code in this file is designed to model the domain of the program (Git project file summarization) and be
+// de-coupled from the implementation details of the user interface. It's ok to be aware of the UI/TUI. But we want to
+// minimize knowledge of the UI implementation details.
+//
+// A poignant effect of this design is that there should be zero references to the Bubble Tea API in this file.
 package main
 
 import (
@@ -17,7 +22,16 @@ type file struct {
 	size     int64 // -1 represents that the size has not yet been fetched.
 }
 
-func FetchSize(f *file) {
+type domainModel struct {
+	updateFn func()
+	files    *[]*file // I'm going for "reference type vibes". Not idiomatic Go, but it's how I know how to program.
+}
+
+func FetchSize(d *domainModel, f *file) {
+	log.Printf("Fetching size for %s\n", f.filePath)
+	f.fetching = true
+	d.updateFn()
+
 	fi, err := os.Stat(f.filePath)
 	if err != nil {
 		log.Fatal(err)
@@ -29,6 +43,7 @@ func FetchSize(f *file) {
 	f.size = fi.Size()
 	f.fetching = false
 	log.Println("Fetched size for", f.filePath)
+	d.updateFn()
 }
 
 func prettyPrintBytes(bytes int64) string {

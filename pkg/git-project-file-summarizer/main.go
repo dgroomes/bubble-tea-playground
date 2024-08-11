@@ -40,10 +40,9 @@ func (f file) Description() string {
 }
 
 type model struct {
-	updateFn        func()
-	domainListModel *[]*file // I'm going for "reference type vibes". Not idiomatic Go, but it's how I know how to program.
-	teaListModel    *teaList.Model
-	keys            key.Binding
+	domainModel  *domainModel
+	teaListModel *teaList.Model
+	keys         key.Binding
 }
 
 func (m *model) Init() tea.Cmd {
@@ -80,13 +79,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					log.Println("[enter] [ok] [fetching]")
 					// todo tick?
 				} else if selectedItem.size == -1 {
-					go func() {
-						log.Printf("Fetching size for %s\n", selectedItem.filePath)
-						selectedItem.fetching = true
-						m.updateFn()
-						FetchSize(selectedItem)
-						m.updateFn()
-					}()
+					go FetchSize(m.domainModel, selectedItem)
 				}
 			} else {
 				log.Fatalf("Unable to cast selectedItem to 'file': %v . This is unexpected.\n", m.teaListModel.SelectedItem())
@@ -151,7 +144,7 @@ func main() {
 			log.Fatal("[updateFn] updateFn was called before the model pointer was set. This is an illegal state.")
 		}
 
-		files := *modelPtr.domainListModel
+		files := *modelPtr.domainModel.files
 
 		if len(files) != 0 {
 			log.Println("[updateFn] 'files' is not empty. Adapting the domain model into the TUI model.")
@@ -207,12 +200,15 @@ func main() {
 		programPtr.Send(struct{}{})
 	}
 
-	// TODO I'd like to experiment with a 'domainModel' and a 'teaModel' to separate the domain logic from the TUI API.
+	d := domainModel{
+		updateFn: updateFn,
+		files:    &[]*file{},
+	}
+
 	m := model{
-		updateFn:        updateFn,
-		teaListModel:    &teaListModel,
-		domainListModel: &[]*file{},
-		keys:            listKeyMap,
+		teaListModel: &teaListModel,
+		domainModel:  &d,
+		keys:         listKeyMap,
 	}
 
 	p := tea.NewProgram(&m, tea.WithAltScreen())
@@ -221,6 +217,7 @@ func main() {
 	*programPtr = *p
 	*modelPtr = m
 
+	// TODO Push this into the domain model
 	go func() {
 		log.Println("Go routine is executing to find Git project files ...")
 		files, err := listGitProjectFiles()
@@ -233,7 +230,7 @@ func main() {
 
 		log.Printf("Found %d files\n", len(files))
 
-		*modelPtr.domainListModel = files
+		*modelPtr.domainModel.files = files
 		updateFn()
 	}()
 
