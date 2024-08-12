@@ -66,12 +66,16 @@ Follow these instructions to build and run some Bubble Tea example programs.
 General clean-ups, TODOs and things I wish to implement for this project
 
 * [ ] Handle when there are no files selected. Use a different message.
-* [ ] IN PROGRESS Other UI components? Can I do a table (yes)? I'm going to implement a "fancy list". This is a much
+* [x] DONE Other UI components? Can I do a table (yes)? I'm going to implement a "fancy list". This is a much
   more "in the weeds" example. I've got something working, I want to refactor it and also add the spinner animation.
    * DONE Functional program
    * Add spinner animation
-   * Consider splitting out a "core/domain" package/file
-   * Consider splitting out a "git" package/file
+   * DONE (sort of; using a 'domain.go' file) Consider splitting out a "core/domain" package/file
+   * DONE (sort of; using a 'domain.go' file) Consider splitting out a "git" package/file
+   * Defect. When I press enter on an entry to start fetching its size and then quickly press '/' to start filtering
+     and then type some characters, the list filters down to empty even if the filter should match an entry.
+   * DONE Go back to value variables (fewer pointers) and allow the Bubble Tea "Update" function to have more logic. The
+     experiment was useful, but I want this demo to settle on idiomatic Bubble Tea.
 
 
 ## Reference

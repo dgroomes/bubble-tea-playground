@@ -16,21 +16,14 @@ import (
 	"time"
 )
 
-type file struct {
+type File struct {
 	filePath string
 	fetching bool
 	size     int64 // -1 represents that the size has not yet been fetched.
 }
 
-type domainModel struct {
-	updateFn func()
-	files    *[]*file // I'm going for "reference type vibes". Not idiomatic Go, but it's how I know how to program.
-}
-
-func FetchSize(d *domainModel, f *file) {
+func (f File) FetchSize() File {
 	log.Printf("Fetching size for %s\n", f.filePath)
-	f.fetching = true
-	d.updateFn()
 
 	fi, err := os.Stat(f.filePath)
 	if err != nil {
@@ -43,7 +36,8 @@ func FetchSize(d *domainModel, f *file) {
 	f.size = fi.Size()
 	f.fetching = false
 	log.Println("Fetched size for", f.filePath)
-	d.updateFn()
+
+	return f
 }
 
 func prettyPrintBytes(bytes int64) string {
@@ -65,7 +59,7 @@ func prettyPrintBytes(bytes int64) string {
 	}
 }
 
-func listGitProjectFiles() ([]*file, error) {
+func listGitProjectFiles() ([]File, error) {
 	currentWorkingDir, err := os.Getwd()
 	if err != nil {
 		log.Fatal(err)
@@ -94,7 +88,7 @@ func listGitProjectFiles() ([]*file, error) {
 
 	m := gitignore.NewMatcher(patterns)
 
-	var files []*file
+	var files []File
 
 	err = filepath.WalkDir(".", func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -130,7 +124,7 @@ func listGitProjectFiles() ([]*file, error) {
 			return nil
 		}
 
-		files = append(files, &file{filePath: path, size: -1})
+		files = append(files, File{filePath: path, size: -1})
 		return nil
 	})
 

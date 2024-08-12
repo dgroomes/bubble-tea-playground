@@ -26,9 +26,9 @@ var titleStyle = lipgloss.NewStyle().
 	Background(lipgloss.Color("#25A065")).
 	Padding(0, 1)
 
-func (f file) Title() string       { return f.filePath }
-func (f file) FilterValue() string { return f.filePath }
-func (f file) Description() string {
+func (f File) Title() string       { return f.filePath }
+func (f File) FilterValue() string { return f.filePath }
+func (f File) Description() string {
 	if f.fetching {
 		return "Fetching..."
 	}
@@ -40,28 +40,57 @@ func (f file) Description() string {
 }
 
 type model struct {
-	domainModel  *domainModel
-	teaListModel *teaList.Model
+	teaListModel teaList.Model
 	keys         key.Binding
 }
 
-func (m *model) Init() tea.Cmd {
-	// We are opting out of Bubble Tea's desire to own the execution of our domain logic. I'm sympathetic to the Elm Architecture
-	// (https://guide.elm-lang.org/architecture) but to me, I don't really understand why the framework wants control
-	// over executing the "update function". I'd rather have my own code update my model as needed, and then signal to
-	// the Bubble Tea TUI machinery that there is a "new generation of the model" and that it should re-render the view.
-	// After all, the rendering model of Bubble Tea (and React) is to "blow away the old view and render a new one" (and
-	// use a diffing algorithm to minimize expense). This is a very convenient programming paradigm.
-	//
-	// So long story short, we send a blank command to Bubble Tea in the "Init" function.
-	return func() tea.Msg { return struct{}{} }
+type foundFiles []File
+
+func (m model) Init() tea.Cmd {
+	return func() tea.Msg {
+		log.Println("Go routine is executing to find Git project files ...")
+		files, err := listGitProjectFiles()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Artificially slow down the program to simulate a slow operation and get a visual effect in the TUI.
+		time.Sleep(750 * time.Millisecond)
+
+		log.Printf("Found %d files\n", len(files))
+
+		return foundFiles(files)
+	}
 }
 
-func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+type afterFetch File
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	log.Printf("[Update] msg=%v teaListModelLength=%d\n", msg, len(m.teaListModel.Items()))
+	log.Printf("[Update] msg=%v\n", msg)
 
 	switch msg := msg.(type) {
+
+	case foundFiles:
+		items := make([]teaList.Item, 0, len(msg))
+		for _, f := range msg {
+			items = append(items, f)
+		}
+		m.teaListModel.SetItems(items)
+		return m, nil
+
+	case afterFetch:
+		for i, item := range m.teaListModel.Items() {
+			f, ok := item.(File)
+			if !ok {
+				log.Fatalf("The 'Item' in the Bubbles list is not a 'File'. This is unexpected.\n")
+			}
+
+			if f.filePath == msg.filePath {
+				m.teaListModel.SetItem(i, File(msg))
+				break
+			}
+		}
 
 	case tea.WindowSizeMsg:
 		h, v := appStyle.GetFrameSize()
@@ -72,17 +101,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 
 		case "enter":
-			selectedItem, ok := m.teaListModel.SelectedItem().(*file)
-			if ok {
-				log.Println("[enter] [ok]")
-				if selectedItem.fetching {
-					log.Println("[enter] [ok] [fetching]")
-					// todo tick?
-				} else if selectedItem.size == -1 {
-					go FetchSize(m.domainModel, selectedItem)
-				}
-			} else {
-				log.Fatalf("Unable to cast selectedItem to 'file': %v . This is unexpected.\n", m.teaListModel.SelectedItem())
+			if len(m.teaListModel.Items()) == 0 {
+				log.Println("No files to summarize.")
+				return m, nil
+			}
+
+			selectedItem, ok := m.teaListModel.SelectedItem().(File)
+			if !ok {
+				log.Fatalf("The 'SelectedItem' in the Bubbles list is not a 'File'. This is unexpected.\n")
+			}
+
+			if selectedItem.size != -1 || selectedItem.fetching {
+				log.Println("Already fetched or fetching. Not fetching again.")
+				return m, nil
+			}
+
+			selectedItem.fetching = true
+			idx := m.teaListModel.Index()
+			m.teaListModel.SetItem(idx, selectedItem)
+			return m, func() tea.Msg {
+				return afterFetch(selectedItem.FetchSize())
 			}
 
 		// These keys should exit the program.
@@ -92,13 +130,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	newListModel, cmd := m.teaListModel.Update(msg)
-	*m.teaListModel = newListModel
+	m.teaListModel = newListModel
 	log.Printf("[Update] newListModel=%d\n", len(newListModel.Items()))
 	cmds = append(cmds, cmd)
 	return m, tea.Batch(cmds...)
 }
 
-func (m *model) View() string {
+func (m model) View() string {
 	return appStyle.Render(m.teaListModel.View())
 }
 
@@ -109,7 +147,7 @@ func main() {
 	// but I couldn't get them to work. So, I'm just doing logging the direct way.
 	f, err := os.OpenFile("debug.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
-		log.Fatalf("error opening file: %v\n", err)
+		log.Fatalf("error opening File: %v\n", err)
 	}
 	//goland:noinspection GoUnhandledErrorResult
 	defer f.Close()
@@ -129,110 +167,12 @@ func main() {
 		}
 	}
 
-	var programPtr = new(tea.Program)
-	var modelPtr = new(model)
-
-	// The updateFn is a bridge between my own domain model and the Bubble Tea machinery. It's similar in spirit to
-	// Bubble Tea's "Update" function, but it isn't message driven. Or you might say, it isn't inspired by the Elm
-	// Architecture. I'm not passionate about the design I've come up with, but just experimenting.
-	updateFn := func() {
-		log.Println("[updateFn]")
-		if programPtr == nil {
-			log.Fatal("[updateFn] updateFn was called before the program pointer was set. This is an illegal state.")
-		}
-		if modelPtr == nil {
-			log.Fatal("[updateFn] updateFn was called before the model pointer was set. This is an illegal state.")
-		}
-
-		files := *modelPtr.domainModel.files
-
-		if len(files) != 0 {
-			log.Println("[updateFn] 'files' is not empty. Adapting the domain model into the TUI model.")
-
-			// Here specifically, we're bridging the domain models' 'set of files' to the model of the 'list' TUI
-			// component in the Bubbles component library. I'm going with a React-style "blow it all away and re-render"
-			// approach. Although here, we're not at the render stage/view stage we're actually at an earlier
-			// "sync the models" stage. This is a wasteful operation, but I like the programming model.
-
-			// First, take note of the selected item in the list. We'll try to preserve this selection.
-			var selectedItem *file
-			if modelPtr.teaListModel.SelectedItem() == nil {
-				log.Println("[updateFn] The Bubbles list has no selected item. This is normal at startup time.")
-			} else {
-				x, ok := modelPtr.teaListModel.SelectedItem().(*file)
-				if !ok {
-					log.Fatal("[updateFn] The 'SelectedItem' in the Bubbles list is not a pointer to 'file'. This is unexpected. (But couldn't it be nil?)")
-				}
-				selectedItem = x
-			}
-
-			desiredIndex := -1
-			items := make([]teaList.Item, 0, len(files))
-			for i, f := range files {
-				items = append(items, f)
-				// This reminds of React and lists. In React, you'll run into a "Warning: Each child in a list should have a unique “key” prop."
-				// And this is well described by the docs:https://react.dev/learn/rendering-lists#keeping-list-items-in-order-with-key
-				//
-				// I'm not using a key. Instead of comparing based on pointer equality, which is dubious because there's
-				// no guarantee that any given address will point the same data in the future.
-				if selectedItem == f {
-					desiredIndex = i
-				}
-			}
-			modelPtr.teaListModel.SetItems(items)
-
-			// Re-select the original item. We have to do this because there is a chance that the list has shifted
-			// (elements added or removed) during this update operation (well there is no chance because I didn't
-			// program it that way, but I'm playing pretend)
-			if desiredIndex >= 0 { // Not totally sure I need this check
-				log.Printf("[updateFn] Reselecting item at index %d\n", desiredIndex)
-				modelPtr.teaListModel.Select(desiredIndex)
-			} else {
-				log.Println("[updateFn] There was no existing item selection. I think this is normal at startup time.")
-			}
-		} else {
-			log.Println("[updateFn] 'files' is empty.")
-		}
-
-		// Signal to the Bubble Tea machinery that something in the model changed. This "do nothing" message will get
-		// sent to the "Update" function and then soon afterward the "View" function will be called to re-render the
-		// view.
-		programPtr.Send(struct{}{})
-	}
-
-	d := domainModel{
-		updateFn: updateFn,
-		files:    &[]*file{},
-	}
-
 	m := model{
-		teaListModel: &teaListModel,
-		domainModel:  &d,
+		teaListModel: teaListModel,
 		keys:         listKeyMap,
 	}
 
 	p := tea.NewProgram(&m, tea.WithAltScreen())
-	// Let's do some acrobatics to make sure our model has access to the Bubble Tea program value. This is not idiomatic
-	// Bubble Tea code but this is what I prefer and like to experiment with.
-	*programPtr = *p
-	*modelPtr = m
-
-	// TODO Push this into the domain model
-	go func() {
-		log.Println("Go routine is executing to find Git project files ...")
-		files, err := listGitProjectFiles()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// Artificially slow down the program to simulate a slow operation and get a visual effect in the TUI.
-		time.Sleep(750 * time.Millisecond)
-
-		log.Printf("Found %d files\n", len(files))
-
-		*modelPtr.domainModel.files = files
-		updateFn()
-	}()
 
 	_, err = p.Run()
 	if err != nil {
